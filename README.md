@@ -52,6 +52,8 @@ git --version
 > successful version checks and insert it here.
 >
 > `[insert screenshot]`
+> <img width="682" height="483" alt="Capture d’écran 2026-05-27 à 00 27 37" src="https://github.com/user-attachments/assets/6308d2a3-f1d3-4d61-81e8-79420c060144" />
+
 
 ---
 
@@ -240,6 +242,11 @@ sqlite3 bibliothek.db ".schema"
 > output in your terminal.
 >
 > `[insert screenshot]`
+> <img width="682" height="483" alt="Capture d’écran 2026-05-27 à 00 35 11" src="https://github.com/user-attachments/assets/7ae8f3b8-75e4-48ee-88b7-2664ebabc80b" />
+> <img width="731" height="693" alt="Capture d’écran 2026-05-27 à 00 36 23" src="https://github.com/user-attachments/assets/3e98d449-1b6a-4bd1-a246-be7e762a0459" />
+
+
+
 
 ### Task 2c – Test Constraints
 
@@ -606,6 +613,9 @@ SELECT * FROM ausleihe WHERE ausleihe_id = 5;
 > **Screenshot 3:** Take a screenshot showing the inserted row.
 >
 > `[insert screenshot]`
+> <img width="731" height="693" alt="Capture d’écran 2026-05-27 à 00 41 18" src="https://github.com/user-attachments/assets/9a103a20-4574-4a03-b92a-8951f5fdf8f9" />
+
+
 
 ### Task 5b – Simulate a Rollback
 
@@ -832,6 +842,8 @@ be emptied to respect foreign key constraints?
 > `.headers on` and `.mode column` active.
 >
 > `[insert screenshot]`
+> <img width="731" height="693" alt="Capture d’écran 2026-05-27 à 00 51 46" src="https://github.com/user-attachments/assets/00bce982-164b-4fe9-b2ec-0a1b110af21b" />
+
 
 ---
 
