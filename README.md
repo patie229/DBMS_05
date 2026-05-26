@@ -52,7 +52,8 @@ git --version
 > successful version checks and insert it here.
 >
 > `[insert screenshot]`
-> <img width="682" height="483" alt="Capture d’écran 2026-05-27 à 00 27 37" src="https://github.com/user-attachments/assets/6308d2a3-f1d3-4d61-81e8-79420c060144" />
+> <img width="682" height="483" alt="Capture d’écran 2026-05-27 à 00 27 37" src="https://github.com/user-attachments/assets/f66d1089-c6e2-496a-b6ab-f761925bd50f" />
+
 
 
 ---
