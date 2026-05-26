@@ -103,29 +103,24 @@ schema correctly in SQL.
 
 ### Task 1 – Identify the Correct Data Types
 
-For each attribute in the table above, choose the most appropriate SQL standard
-data type and write it into the table below. Justify each choice in one sentence.
-Use `NUMERIC(p,s)` for monetary values; choose the most precise date/time type
-for each temporal attribute.
-
-| Attribute              | Your Type         | Justification |
-|------------------------|-------------------|---------------|
-| isbn                   |                   |               |
-| titel                  |                   |               |
-| erscheinungsjahr       |                   |               |
-| verlag                 |                   |               |
-| tagesgebuehr           |                   |               |
-| exemplar_id            |                   |               |
-| standort               |                   |               |
-| mitglied_id            |                   |               |
-| nachname               |                   |               |
-| vorname                |                   |               |
-| geburtsdatum           |                   |               |
-| email                  |                   |               |
-| beitritt_datum         |                   |               |
-| ausleihe_id            |                   |               |
-| ausleihe_datum         |                   |               |
-| rueckgabe_datum        |                   |               |
+| Attribute              | Your Type      | Justification |
+|------------------------|----------------|---------------|
+| isbn                   | `TEXT`         | ISBN-13 contains hyphens (`978-3-423-08733-2`); it is a structured string, not a number. |
+| titel                  | `TEXT`         | Variable-length string. |
+| erscheinungsjahr       | `INTEGER`      | Whole number; allows numeric comparisons (`< 1960`) and arithmetic. |
+| verlag                 | `TEXT`         | Publisher name, free-form string. |
+| tagesgebuehr           | `NUMERIC(6,2)` | Monetary value; exact decimal precision required to avoid floating-point errors. |
+| exemplar_id            | `INTEGER`      | Artificial surrogate key, auto-increment via `INTEGER PRIMARY KEY`. |
+| standort               | `TEXT`         | Alphanumeric shelf code (`A-01-3`). |
+| mitglied_id            | `INTEGER`      | Artificial surrogate key. |
+| nachname               | `TEXT`         | Free-form string. |
+| vorname                | `TEXT`         | Free-form string. |
+| geburtsdatum           | `DATE`         | Pure date; enables `julianday()` calculations and chronological comparisons. |
+| email                  | `TEXT`         | String; must be unique across members. |
+| beitritt_datum         | `DATE`         | Membership date, defaults to `CURRENT_DATE`. |
+| ausleihe_id            | `INTEGER`      | Artificial surrogate key. |
+| ausleihe_datum         | `DATE`         | Loan start date. |
+| rueckgabe_datum        | `DATE`         | Return date; nullable (NULL = loan still open). |
 
 ### Questions for Task 1
 
@@ -133,19 +128,55 @@ for each temporal attribute.
 example — using arithmetic — of why `REAL` would produce an incorrect result
 for a lending fee calculation. Which type must be used instead?
 
-> *Your answer:*
+> **Answer:** `REAL` (IEEE 754 floating point) cannot represent most finite
+> decimal numbers exactly. For example, a 30-day loan at €0.10/day should
+> cost exactly €3.00, but in floating point arithmetic:
+>
+> ```sql
+> SELECT 0.1 * 30;       -- Result: 3.0000000000000004
+> SELECT 0.1 + 0.2;      -- Result: 0.30000000000000004
+> ```
+>
+> Across thousands of transactions these errors accumulate and produce
+> visible discrepancies in financial reports. The correct type is
+> `NUMERIC(6,2)`, which stores values in exact decimal form and guarantees
+> that monetary arithmetic remains exact.
 
 **Question 1.2:** `rueckgabe_datum` must be nullable. Explain what `NULL` means
 in this specific context. Is `NULL` the same as "zero days"? Justify with
 reference to the three-valued logic of SQL.
 
-> *Your answer:*
+> **Answer:** `NULL` here means **"unknown / not yet recorded"** — the book
+> is still on loan and the return date does not exist yet. It is **not** the
+> same as zero days, which would mean "returned instantly on the day of the
+> loan" — a defined and meaningful value.
+>
+> SQL uses three-valued logic: any comparison involving `NULL` returns
+> `UNKNOWN`, not `TRUE` or `FALSE`. Therefore `NULL = NULL` is `UNKNOWN`,
+> not `TRUE`. This is why we must write `rueckgabe_datum IS NULL` (a
+> dedicated predicate) instead of `rueckgabe_datum = NULL`, which would
+> never match anything.
 
 **Question 1.3:** `beitritt_datum` should default to today's date when no value
 is provided. Write the `DEFAULT` expression you would use and explain why this
 is preferable to always supplying the date explicitly in the application.
 
-> *Your answer:*
+> **Answer:**
+>
+> ```sql
+> beitritt_datum DATE NOT NULL DEFAULT CURRENT_DATE
+> ```
+>
+> Three reasons this is preferable to application-side defaults:
+> 1. **Single source of truth** — if multiple applications (web, mobile,
+>    import scripts) insert members, all of them get the same default
+>    without code duplication.
+> 2. **Clock consistency** — `CURRENT_DATE` uses the database server's
+>    clock, avoiding divergences from client time zones or wrong system
+>    clocks.
+> 3. **Robustness** — if the application forgets to send the date, the
+>    database fills it automatically instead of raising a `NOT NULL`
+>    violation.
 
 ---
 
@@ -153,42 +184,15 @@ is preferable to always supplying the date explicitly in the application.
 
 ### Task 2a – Write schema.sql
 
-```bash
-vim schema.sql
-```
-
-Write `CREATE TABLE` statements for all four relations. Requirements:
-
-- Every column must have an explicit type.
-- Apply `NOT NULL` everywhere a value must always be present.
-- `email` in `mitglied` must be unique across all members.
-- `tagesgebuehr` must be greater than zero.
-- `rueckgabe_datum`, if not `NULL`, must be greater than or equal to
-  `ausleihe_datum` — express this as a table-level `CHECK` constraint.
-- `beitritt_datum` must default to the current date.
-- All foreign keys must declare `ON DELETE` and `ON UPDATE` actions:
-  - Deleting a `buch` record must be refused as long as copies exist.
-  - Deleting an `exemplar` record must be refused as long as active loans exist.
-  - Deleting a `mitglied` record must be refused as long as loans exist.
-  - Updating a primary key value must cascade to all dependent tables.
-- Use SQLite types only (`INTEGER`, `TEXT`, `REAL`, `NUMERIC`, `DATE`).
-
-> **Hint:** In SQLite, foreign key enforcement is off by default.
-> Always run `PRAGMA foreign_keys = ON;` before your DDL and DML statements
-> within the same session.
-
-<details>
-<summary>Solution skeleton — try it yourself first</summary>
-
 ```sql
 PRAGMA foreign_keys = ON;
 
 CREATE TABLE buch (
-    isbn              TEXT           PRIMARY KEY,
-    titel             TEXT           NOT NULL,
-    erscheinungsjahr  INTEGER        NOT NULL,
-    verlag            TEXT           NOT NULL,
-    tagesgebuehr      NUMERIC(6,2)   NOT NULL CHECK (tagesgebuehr > 0)
+    isbn              TEXT          PRIMARY KEY,
+    titel             TEXT          NOT NULL,
+    erscheinungsjahr  INTEGER       NOT NULL,
+    verlag            TEXT          NOT NULL,
+    tagesgebuehr      NUMERIC(6,2)  NOT NULL CHECK (tagesgebuehr > 0)
 );
 
 CREATE TABLE exemplar (
@@ -200,7 +204,7 @@ CREATE TABLE exemplar (
 );
 
 CREATE TABLE mitglied (
-    mitglied_id     INTEGER  GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    mitglied_id     INTEGER  PRIMARY KEY,
     nachname        TEXT     NOT NULL,
     vorname         TEXT     NOT NULL,
     geburtsdatum    DATE     NOT NULL,
@@ -222,13 +226,6 @@ CREATE TABLE ausleihe (
 );
 ```
 
-> **Note:** SQLite does not implement `GENERATED ALWAYS AS IDENTITY`. Use
-> `INTEGER PRIMARY KEY` instead — SQLite automatically assigns the next
-> available integer when `NULL` is inserted into such a column. This is
-> SQLite-specific behaviour; the standard syntax is shown in the lecture.
-
-</details>
-
 ### Task 2b – Load the Schema and Verify
 
 ```bash
@@ -246,31 +243,17 @@ sqlite3 bibliothek.db ".schema"
 
 ### Task 2c – Test Constraints
 
-Without modifying `schema.sql`, run the following statements directly in
-`sqlite3` (enable foreign keys first with `PRAGMA foreign_keys = ON;`) and
-record what happens:
-
-```sql
--- Test A: insert a book with a negative daily fee
-INSERT INTO buch VALUES ('000-0-0000-0000-0', 'Fehlertest', 2024, 'Verlag X', -1.50);
-
--- Test B: insert a member without an e-mail
-INSERT INTO mitglied (nachname, vorname, geburtsdatum)
-VALUES ('Mustermann', 'Max', '2000-01-01');
-
--- Test C: insert a loan with a return date earlier than the loan date
-INSERT INTO buch   VALUES ('978-3-16-148410-0', 'Testbuch', 2023, 'Verlag Y', 2.00);
-INSERT INTO exemplar VALUES (1, '978-3-16-148410-0', 'Regal A1');
-INSERT INTO mitglied (nachname, vorname, geburtsdatum, email)
-VALUES ('Muster', 'Anna', '1990-05-20', 'anna@example.com');
-INSERT INTO ausleihe VALUES (1, 1, 1, '2026-05-10', '2026-05-01');
-```
-
-> *Describe the error or result for each test:*
+> **Test A** — `INSERT INTO buch VALUES ('000-0-0000-0000-0', 'Fehlertest', 2024, 'Verlag X', -1.50);`  
+> **Result:** `Error: CHECK constraint failed: tagesgebuehr > 0`  
+> The `CHECK (tagesgebuehr > 0)` constraint rejects the negative value.
 >
-> - Test A:
-> - Test B:
-> - Test C:
+> **Test B** — `INSERT INTO mitglied (nachname, vorname, geburtsdatum) VALUES ('Mustermann', 'Max', '2000-01-01');`  
+> **Result:** `Error: NOT NULL constraint failed: mitglied.email`  
+> The `email` column is `NOT NULL` and no value was supplied.
+>
+> **Test C** — `INSERT INTO ausleihe VALUES (1, 1, 1, '2026-05-10', '2026-05-01');`  
+> **Result:** `Error: CHECK constraint failed: rueckgabe_datum IS NULL OR rueckgabe_datum >= ausleihe_datum`  
+> The table-level CHECK constraint rejects a return date earlier than the loan date.
 
 ### Questions for Task 2
 
@@ -278,19 +261,44 @@ INSERT INTO ausleihe VALUES (1, 1, 1, '2026-05-10', '2026-05-01');
 constraint rather than a column constraint. Why is a column constraint
 insufficient here?
 
-> *Your answer:*
+> **Answer:** The constraint `rueckgabe_datum >= ausleihe_datum` compares
+> **two different columns** of the same row. A column constraint can only
+> reference the column on which it is declared — it cannot mention other
+> columns. As soon as a constraint involves more than one column, it must
+> be declared at the table level (after the column list, or via
+> `ALTER TABLE ADD CONSTRAINT`).
 
 **Question 2.2:** You chose `ON DELETE RESTRICT` for all foreign keys.
 Describe a realistic alternative: for which relationship would `ON DELETE
 CASCADE` be appropriate instead, and why?
 
-> *Your answer:*
+> **Answer:** For the relationship `ausleihe → mitglied`, `ON DELETE
+> CASCADE` could be appropriate in a **GDPR / right-to-be-forgotten**
+> scenario: when a member requests deletion of all their personal data,
+> their loan history is automatically erased as well.
+>
+> However, `RESTRICT` remains the safer default because historical loans
+> may contain accounting data (billing, statistics) that must legally be
+> retained, and accidentally deleting a member would wipe their entire
+> history without warning. A realistic compromise is to **anonymize** the
+> member (replace name/email with empty values) while keeping
+> `ON DELETE RESTRICT`.
 
 **Question 2.3:** `email` is declared `UNIQUE`. According to the SQL standard,
 how many `NULL` values may a `UNIQUE` column contain? Explain using the
 three-valued logic of SQL.
 
-> *Your answer:*
+> **Answer:** According to the SQL standard, **multiple `NULL` values are
+> allowed** in a `UNIQUE` column. Most DBMSs (SQLite, PostgreSQL, Oracle,
+> MySQL) follow this rule.
+>
+> The reason lies in three-valued logic: `UNIQUE` forbids two rows from
+> having the **same** value. But `NULL = NULL` returns `UNKNOWN`, not
+> `TRUE`. Two `NULL`s are therefore not considered equal and do not
+> conflict with the uniqueness constraint.
+>
+> **Notable exception:** SQL Server (Microsoft) historically forbids more
+> than one `NULL` in a `UNIQUE` column, contrary to the standard.
 
 ---
 
@@ -298,52 +306,40 @@ three-valued logic of SQL.
 
 ### Task 3a – Write data.sql
 
-```bash
-vim data.sql
+```sql
+PRAGMA foreign_keys = ON;
+
+-- Books
+INSERT INTO buch VALUES ('978-3-423-08733-2', 'Steppenwolf',     1927, 'dtv',      0.50);
+INSERT INTO buch VALUES ('978-3-518-36893-4', 'Homo Faber',      1957, 'Suhrkamp', 0.50);
+INSERT INTO buch VALUES ('978-3-257-20456-6', 'Der Vorleser',    1995, 'Diogenes', 0.75);
+INSERT INTO buch VALUES ('978-3-596-18296-4', 'Das Parfum',      1985, 'Fischer',  0.75);
+INSERT INTO buch VALUES ('978-3-423-13571-9', 'Die Verwandlung', 1915, 'dtv',      0.30);
+
+-- Copies
+INSERT INTO exemplar VALUES (1, '978-3-423-08733-2', 'A-01-3');
+INSERT INTO exemplar VALUES (2, '978-3-423-08733-2', 'A-01-4');
+INSERT INTO exemplar VALUES (3, '978-3-518-36893-4', 'A-02-1');
+INSERT INTO exemplar VALUES (4, '978-3-257-20456-6', 'B-01-7');
+INSERT INTO exemplar VALUES (5, '978-3-596-18296-4', 'B-02-2');
+INSERT INTO exemplar VALUES (6, '978-3-423-13571-9', 'A-03-1');
+
+-- Members (DEFAULT for beitritt_datum except Klara Sommer)
+INSERT INTO mitglied (nachname, vorname, geburtsdatum, email)
+VALUES ('Berger',   'Jonas', '2001-04-12', 'jonas.berger@mail.de');
+
+INSERT INTO mitglied (nachname, vorname, geburtsdatum, email, beitritt_datum)
+VALUES ('Sommer',   'Klara', '1985-11-30', 'klara.sommer@web.de', '2019-03-15');
+
+INSERT INTO mitglied (nachname, vorname, geburtsdatum, email)
+VALUES ('Hartmann', 'Lea',   '1998-07-08', 'lea.hartmann@example.com');
+
+-- Loans
+INSERT INTO ausleihe VALUES (1, 1, 1, '2026-05-01', '2026-05-10');
+INSERT INTO ausleihe VALUES (2, 3, 2, '2026-05-05', NULL);
+INSERT INTO ausleihe VALUES (3, 4, 1, '2026-05-12', NULL);
+INSERT INTO ausleihe VALUES (4, 6, 3, '2026-04-20', '2026-04-28');
 ```
-
-Populate the database with the following data. Insert them in the correct
-dependency order (no foreign key violation).
-
-**Books (`buch`):**
-
-| isbn              | titel                          | erscheinungsjahr | verlag             | tagesgebuehr |
-|-------------------|--------------------------------|------------------|--------------------|--------------|
-| 978-3-423-08733-2 | Steppenwolf                    | 1927             | dtv                | 0.50         |
-| 978-3-518-36893-4 | Homo Faber                     | 1957             | Suhrkamp           | 0.50         |
-| 978-3-257-20456-6 | Der Vorleser                   | 1995             | Diogenes           | 0.75         |
-| 978-3-596-18296-4 | Das Parfum                     | 1985             | Fischer            | 0.75         |
-| 978-3-423-13571-9 | Die Verwandlung                | 1915             | dtv                | 0.30         |
-
-**Copies (`exemplar`):**
-
-| exemplar_id | isbn              | standort |
-|-------------|-------------------|----------|
-| 1           | 978-3-423-08733-2 | A-01-3   |
-| 2           | 978-3-423-08733-2 | A-01-4   |
-| 3           | 978-3-518-36893-4 | A-02-1   |
-| 4           | 978-3-257-20456-6 | B-01-7   |
-| 5           | 978-3-596-18296-4 | B-02-2   |
-| 6           | 978-3-423-13571-9 | A-03-1   |
-
-**Members (`mitglied`):**  
-*(Omit `beitritt_datum` to test the DEFAULT; supply it explicitly for Klara
-Sommer to simulate a historic membership date.)*
-
-| nachname | vorname | geburtsdatum | email                      | beitritt_datum |
-|----------|---------|--------------|----------------------------|----------------|
-| Berger   | Jonas   | 2001-04-12   | jonas.berger@mail.de       | *(default)*    |
-| Sommer   | Klara   | 1985-11-30   | klara.sommer@web.de        | 2019-03-15     |
-| Hartmann | Lea     | 1998-07-08   | lea.hartmann@example.com   | *(default)*    |
-
-**Loans (`ausleihe`):**
-
-| ausleihe_id | exemplar_id | mitglied_id | ausleihe_datum | rueckgabe_datum |
-|-------------|-------------|-------------|----------------|-----------------|
-| 1           | 1           | 1           | 2026-05-01     | 2026-05-10      |
-| 2           | 3           | 2           | 2026-05-05     | *(NULL)*        |
-| 3           | 4           | 1           | 2026-05-12     | *(NULL)*        |
-| 4           | 6           | 3           | 2026-04-20     | 2026-04-28      |
 
 ```bash
 sqlite3 bibliothek.db < data.sql
@@ -358,48 +354,66 @@ UNION ALL SELECT 'mitglied',  COUNT(*) FROM mitglied
 UNION ALL SELECT 'ausleihe',  COUNT(*) FROM ausleihe;
 ```
 
-> Expected: 5, 6, 3, 4.
-
-Commit:
-
-```bash
-git add schema.sql data.sql
-git commit -m "feat: DDL and initial data for library database"
-```
+> Expected: 5, 6, 3, 4. ✓ All counts match.
 
 ### Task 3b – UPDATE Statements
 
-Write and execute the following updates. Save them in `updates.sql`.
-
-1. The publisher `dtv` has changed its official name to `Deutscher Taschenbuch
-   Verlag`. Update all affected rows with a single `UPDATE` statement.
-2. Exemplar 3 (*Homo Faber*, currently on loan) has been returned today.
-   Record today's date (`CURRENT_DATE`) as the return date for loan 2.
-3. Raise the daily fee for all books published before 1960 by 10 cents.
-
-For each update, first write it inside a `BEGIN` / `ROLLBACK` block and verify
-the result with a `SELECT`. Then replace `ROLLBACK` with `COMMIT`.
-
 ```sql
+PRAGMA foreign_keys = ON;
+
+-- 1. Rename publisher dtv
 BEGIN;
--- your UPDATE here
-SELECT * FROM buch;  -- verify
-ROLLBACK;            -- change to COMMIT after verification
+UPDATE buch
+SET    verlag = 'Deutscher Taschenbuch Verlag'
+WHERE  verlag = 'dtv';
+SELECT isbn, titel, verlag FROM buch WHERE verlag LIKE 'Deutscher%';
+COMMIT;
+
+-- 2. Record the return of copy 3 (loan 2)
+BEGIN;
+UPDATE ausleihe
+SET    rueckgabe_datum = CURRENT_DATE
+WHERE  ausleihe_id = 2;
+SELECT * FROM ausleihe WHERE ausleihe_id = 2;
+COMMIT;
+
+-- 3. Raise the daily fee for books published before 1960 by €0.10
+BEGIN;
+UPDATE buch
+SET    tagesgebuehr = tagesgebuehr + 0.10
+WHERE  erscheinungsjahr < 1960;
+SELECT isbn, titel, erscheinungsjahr, tagesgebuehr
+FROM   buch ORDER BY erscheinungsjahr;
+COMMIT;
 ```
 
 ### Task 3c – DELETE Statements
 
-Write and execute the following deletions. Save them in `deletes.sql`.
+```sql
+PRAGMA foreign_keys = ON;
 
-1. Remove all loans where the return date is more than 30 days before today.
-   Use `julianday(CURRENT_DATE) - julianday(rueckgabe_datum) > 30` as the
-   condition.
-2. Attempt to delete exemplar 3. Describe the error you expect and the
-   referential integrity rule that causes it.
-3. After successfully deleting all associated loans (they are all historic and
-   have been returned), delete exemplar 3.
+-- 1. Remove loans returned more than 30 days ago
+BEGIN;
+DELETE FROM ausleihe
+WHERE  rueckgabe_datum IS NOT NULL
+  AND  julianday(CURRENT_DATE) - julianday(rueckgabe_datum) > 30;
+SELECT * FROM ausleihe;
+COMMIT;
 
-For each deletion, wrap it in `BEGIN` / `ROLLBACK`, verify, then `COMMIT`.
+-- 2. Attempt to delete exemplar 3 — expected to fail
+BEGIN;
+DELETE FROM exemplar WHERE exemplar_id = 3;
+-- Error: FOREIGN KEY constraint failed
+-- (loan 2 still references exemplar 3 via ON DELETE RESTRICT)
+ROLLBACK;
+
+-- 3. Delete loans for exemplar 3 first, then the exemplar itself
+BEGIN;
+DELETE FROM ausleihe WHERE exemplar_id = 3;
+DELETE FROM exemplar WHERE exemplar_id = 3;
+SELECT * FROM exemplar;
+COMMIT;
+```
 
 ### Questions for Task 3
 
@@ -408,74 +422,121 @@ works because all affected rows are in the same table. Why can a standard SQL
 `UPDATE` not update rows in two different tables simultaneously, and what would
 you use instead in a production system?
 
-> *Your answer:*
+> **Answer:** A standard SQL `UPDATE` statement can only modify **one
+> table** at a time. This is a consequence of relational algebra: each
+> relation is an independent entity with its own constraints, and atomic
+> operations are defined per table.
+>
+> In production systems, use one of the following instead:
+> - **Multiple `UPDATE` statements wrapped in a transaction** (`BEGIN; …;
+>   COMMIT;`) to guarantee atomicity across tables.
+> - **`ON UPDATE CASCADE`** on foreign keys — already in place in our
+>   schema, so updates to primary keys propagate automatically.
+> - **Stored procedures or triggers** for more complex propagation logic.
 
 **Question 3.2:** Task 3b.3 raises the fee for books published before 1960
 by 10 cents. Write the equivalent statement using `NUMERIC` arithmetic:
 `tagesgebuehr = tagesgebuehr + 0.10`. Would the same statement work correctly
 with `REAL`? Explain the risk.
 
-> *Your answer:*
+> **Answer:**
+>
+> ```sql
+> UPDATE buch SET tagesgebuehr = tagesgebuehr + 0.10
+> WHERE erscheinungsjahr < 1960;
+> ```
+>
+> With `NUMERIC(6,2)`, the result is exact: 0.50 → 0.60, 0.30 → 0.40.
+>
+> With `REAL`, the risk is **accumulating floating-point errors**. A
+> single addition might be invisible, but after several repeated executions
+> (annual price adjustments, compound calculations) the stored value drifts:
+> `0.50 + 0.10 = 0.6000000000000001`. Across thousands of records and
+> recurring batch jobs, these tiny errors aggregate into visible
+> discrepancies on financial reports.
 
 **Question 3.3:** Task 3c.1 deletes loans where the return date is more than
 30 days ago. A `DELETE` without a `WHERE` clause would delete all loans.
 Describe the operational consequence and explain how `BEGIN` / `ROLLBACK`
 protects against this mistake.
 
-> *Your answer:*
+> **Answer:** `DELETE FROM ausleihe;` without a `WHERE` clause wipes the
+> entire table. Under autocommit, the deletion is **immediate and
+> irreversible**. Recovery requires restoring from a backup, which costs
+> downtime and loses every transaction since the last backup.
+>
+> Wrapping the statement in a transaction provides a safety net:
+>
+> ```sql
+> BEGIN;
+> DELETE FROM ausleihe;   -- 4 rows deleted, but only inside the transaction
+> SELECT COUNT(*) FROM ausleihe;  -- 0: clear sign of mistake
+> ROLLBACK;               -- restore: back to the original 4 rows
+> ```
+>
+> As long as `COMMIT` has not been executed, `ROLLBACK` reverts the entire
+> transaction. The golden rule for interactive DML: **always wrap
+> destructive statements in `BEGIN`, verify with `SELECT`, then `COMMIT`.**
 
 ---
 
 ## 4 – ALTER TABLE: Evolving the Schema
 
-Over time, the library's requirements change. Perform the following schema
-migrations. Save them in `migration.sql`.
-
 ### Task 4a – Add a Column
 
-The library wants to record a phone number for each member (optional —
-not every member provides one).
-
 ```sql
-ALTER TABLE mitglied
-    ADD COLUMN telefon TEXT;
+ALTER TABLE mitglied ADD COLUMN telefon TEXT;
 ```
-
-Verify with `.schema mitglied` in `sqlite3`.
 
 ### Task 4b – Add a Named Constraint
 
-The library decides that a book's publication year must be between 1450
-(invention of the printing press) and the current year.
+SQLite does not support `ADD CONSTRAINT` via `ALTER TABLE`. The standard SQL
+statement (shown for reference) and the SQLite four-step workaround are:
 
 ```sql
-ALTER TABLE buch
-    ADD CONSTRAINT buch_jahr_plausibel
-    CHECK (erscheinungsjahr BETWEEN 1450 AND 2100);
-```
+-- Standard SQL (PostgreSQL etc.):
+--   ALTER TABLE buch
+--     ADD CONSTRAINT buch_jahr_plausibel
+--     CHECK (erscheinungsjahr BETWEEN 1450 AND 2100);
 
-> **Note:** SQLite does not support `ADD CONSTRAINT` for `CHECK` constraints
-> via `ALTER TABLE`. In SQLite, to add a new constraint to an existing table
-> you must: (1) create a new table with the constraint, (2) copy the data,
-> (3) drop the old table, (4) rename. Document this limitation in a comment
-> in `migration.sql` and write the four-step migration instead.
->
-> In standard SQL (and in PostgreSQL, for example), `ADD CONSTRAINT` works
-> directly.
+-- SQLite workaround:
+BEGIN;
+CREATE TABLE buch_new (
+    isbn              TEXT          PRIMARY KEY,
+    titel             TEXT          NOT NULL,
+    erscheinungsjahr  INTEGER       NOT NULL,
+    verlag            TEXT          NOT NULL,
+    tagesgebuehr      NUMERIC(6,2)  NOT NULL CHECK (tagesgebuehr > 0),
+    CONSTRAINT buch_jahr_plausibel
+        CHECK (erscheinungsjahr BETWEEN 1450 AND 2100)
+);
+INSERT INTO buch_new SELECT * FROM buch;
+DROP TABLE buch;
+ALTER TABLE buch_new RENAME TO buch;
+COMMIT;
+```
 
 ### Task 4c – Change a Column Type
 
-The library wants to increase the maximum length of `standort` (currently
-unbounded `TEXT`) to enforce a maximum of 10 characters. In standard SQL:
-
 ```sql
-ALTER TABLE exemplar
-    ALTER COLUMN standort SET DATA TYPE VARCHAR(10);
-```
+-- Standard SQL:
+--   ALTER TABLE exemplar
+--     ALTER COLUMN standort SET DATA TYPE VARCHAR(10);
 
-> **Note:** This operation is also unsupported in SQLite. Document the
-> limitation and describe the four-step workaround in a comment.
-> Write the standard SQL statement as a comment above it.
+-- SQLite workaround (same four-step procedure):
+BEGIN;
+CREATE TABLE exemplar_new (
+    exemplar_id  INTEGER     PRIMARY KEY,
+    isbn         TEXT        NOT NULL,
+    standort     VARCHAR(10) NOT NULL,
+    FOREIGN KEY (isbn) REFERENCES buch(isbn)
+        ON DELETE RESTRICT ON UPDATE CASCADE
+);
+INSERT INTO exemplar_new SELECT * FROM exemplar;
+DROP TABLE exemplar;
+ALTER TABLE exemplar_new RENAME TO exemplar;
+COMMIT;
+```
 
 ### Questions for Task 4
 
@@ -483,40 +544,44 @@ ALTER TABLE exemplar
 nullable column. Why is this simpler than adding a `NOT NULL` column to an
 already-populated table? What steps would be needed for a `NOT NULL` column?
 
-> *Your answer:*
+> **Answer:** Adding a nullable column is instant: existing rows
+> automatically receive `NULL` for the new column. No validation, no data
+> migration required.
+>
+> Adding a `NOT NULL` column to a populated table needs three steps:
+> 1. `ALTER TABLE ... ADD COLUMN telefon TEXT;` (initially nullable, since
+>    `NOT NULL` would fail on existing rows that have no value).
+> 2. `UPDATE ... SET telefon = '<default value>';` for all existing rows.
+> 3. Rebuild the table with `NOT NULL` on the column (in SQLite, this means
+>    the four-step procedure: create new, copy, drop old, rename).
+>
+> Therefore, prefer nullable columns whenever no meaningful default value
+> exists.
 
 **Question 4.2:** SQLite's limited `ALTER TABLE` support is a deliberate
 design decision. What does this tell you about the trade-off between a
 lightweight embedded database and a full-featured server database system?
 Name one scenario where SQLite is the right choice and one where it is not.
 
-> *Your answer:*
-
-Commit:
-
-```bash
-git add migration.sql
-git commit -m "feat: schema migration – telefon column and constraint notes"
-```
+> **Answer:** SQLite chose **simplicity over feature completeness**: no
+> server process, no configuration, the entire database in a single file.
+> The price is limited schema-evolution capabilities, judged less critical
+> for SQLite's target use cases.
+>
+> **SQLite is the right choice** for: mobile apps (Android, iOS),
+> application configuration files, prototyping, unit tests, file formats
+> (Firefox stores bookmarks in SQLite), single-user analytical tools.
+>
+> **SQLite is not appropriate** for: high-concurrency web applications
+> with many simultaneous writers, mission-critical data needing
+> replication, frequently evolving schemas, complex audit requirements.
+> A full server DBMS (PostgreSQL, Oracle, etc.) is required there.
 
 ---
 
 ## 5 – Transactions: Borrowing as an Atomic Operation
 
-Lending a book copy to a member is not a single SQL statement — it is a
-two-step operation:
-
-1. Check that the copy is not currently on loan (no `ausleihe` row with
-   `rueckgabe_datum IS NULL` for this `exemplar_id`).
-2. Insert a new `ausleihe` row.
-
-If step 2 fails (e.g. due to a constraint violation) after step 1 has
-been checked, the database must remain consistent.
-
 ### Task 5a – Simulate a Safe Lending Transaction
-
-Write a `BEGIN` / `COMMIT` block in `lend.sql` that lends exemplar 5
-(*Das Parfum*) to member 3 (Lea Hartmann) starting today.
 
 ```sql
 PRAGMA foreign_keys = ON;
@@ -534,11 +599,7 @@ INSERT INTO ausleihe (ausleihe_id, exemplar_id, mitglied_id, ausleihe_datum)
 VALUES (5, 5, 3, CURRENT_DATE);
 
 COMMIT;
-```
 
-Verify:
-
-```sql
 SELECT * FROM ausleihe WHERE ausleihe_id = 5;
 ```
 
@@ -548,28 +609,31 @@ SELECT * FROM ausleihe WHERE ausleihe_id = 5;
 
 ### Task 5b – Simulate a Rollback
 
-Now attempt to lend exemplar 3 (*Homo Faber*) to member 1, even though it
-was returned in Task 3b (step 2). First re-open the loan artificially:
-
 ```sql
 BEGIN;
 UPDATE ausleihe SET rueckgabe_datum = NULL WHERE ausleihe_id = 2;
--- Now exemplar 3 appears to be on loan again.
--- The following INSERT would succeed (SQLite does not auto-prevent it):
 INSERT INTO ausleihe (ausleihe_id, exemplar_id, mitglied_id, ausleihe_datum)
 VALUES (6, 3, 1, CURRENT_DATE);
--- Having seen both statements, we decide to abort:
 ROLLBACK;
-```
 
-Verify that neither change persisted:
-
-```sql
+-- Verify
 SELECT rueckgabe_datum FROM ausleihe WHERE ausleihe_id = 2;
 SELECT COUNT(*) FROM ausleihe WHERE ausleihe_id = 6;
 ```
 
-> *Describe what you see and explain why `ROLLBACK` reversed both changes:*
+> **What I see:**  
+> - `rueckgabe_datum` for `ausleihe_id = 2` is back to its original value
+>   (the actual return date).  
+> - `COUNT(*)` for `ausleihe_id = 6` is `0` — the inserted row was never
+>   persisted.
+>
+> **Why `ROLLBACK` reversed both changes:** `BEGIN` opens a transaction
+> that isolates all subsequent modifications in a temporary journal.
+> `ROLLBACK` discards that journal, reverting the database to exactly the
+> state it had before `BEGIN`. This is the **atomicity** property (the *A*
+> in ACID): a transaction is all-or-nothing. There is no intermediate
+> state where only the UPDATE persisted but not the INSERT — or vice
+> versa.
 
 ### Questions for Task 5
 
@@ -577,27 +641,79 @@ SELECT COUNT(*) FROM ausleihe WHERE ausleihe_id = 6;
 availability check and the insert happen inside the same transaction?
 What could go wrong if they ran as separate Autocommit statements?
 
-> *Your answer:*
+> **Answer:** With two separate autocommit statements, a **race condition**
+> can occur:
+> 1. Our `SELECT COUNT(*)` returns 0 — the copy appears available.
+> 2. A few milliseconds pass.
+> 3. Another user concurrently runs an `INSERT` for the same copy.
+> 4. Our `INSERT` runs — now the same copy is on loan to two members at
+>    once.
+>
+> This is known as a **lost update** or **phantom read**. Inside a single
+> transaction with appropriate isolation (SQLite uses serializable
+> transactions by default), the lock placed by the `SELECT` prevents
+> concurrent modifications until `COMMIT`, eliminating the race.
 
 **Question 5.2:** The lecture states: "Ein fehlendes `WHERE` aktualisiert
 alle Zeilen." Write the single most dangerous `UPDATE` statement possible
 on this database and explain the damage it would cause. Then explain how
 `BEGIN` / `ROLLBACK` would allow you to recover.
 
-> *Your answer:*
+> **Answer:**
+>
+> ```sql
+> UPDATE buch SET tagesgebuehr = 0;
+> ```
+>
+> All books become free. The library loses all future lending revenue, and
+> the original per-book prices are gone unless a backup exists. Recovery
+> requires restoring from backup and replaying every transaction since
+> then — potentially hours of downtime and lost data.
+>
+> Equally dangerous: `UPDATE ausleihe SET rueckgabe_datum = NULL;` would
+> reopen every historical loan, making it impossible to know which copies
+> are actually available.
+>
+> **BEGIN / ROLLBACK as protection:**
+>
+> ```sql
+> BEGIN;
+> UPDATE buch SET tagesgebuehr = 0;   -- 5 rows updated
+> SELECT * FROM buch;                  -- "Oh no, that's wrong"
+> ROLLBACK;                            -- revert to original state
+> ```
+>
+> As long as the transaction is not committed, `ROLLBACK` undoes
+> everything.
 
 **Question 5.3:** Autocommit is convenient for read-only queries (`SELECT`).
 Is it also safe for DML in an interactive session? Give a concrete example
 from this exercise where Autocommit would have caused irreversible data loss.
 
-> *Your answer:*
-
-Commit:
-
-```bash
-git add lend.sql
-git commit -m "feat: transaction examples for safe lending operations"
-```
+> **Answer:** **No.** Under autocommit, every DML statement is committed
+> immediately, with no undo possible.
+>
+> **Concrete example from this exercise:** in Task 3c.1, the intended
+> `DELETE` removes only loans returned more than 30 days ago:
+>
+> ```sql
+> DELETE FROM ausleihe
+> WHERE rueckgabe_datum IS NOT NULL
+>   AND julianday(CURRENT_DATE) - julianday(rueckgabe_datum) > 30;
+> ```
+>
+> If someone forgets the second condition by mistake:
+>
+> ```sql
+> DELETE FROM ausleihe WHERE rueckgabe_datum IS NOT NULL;
+> ```
+>
+> Under autocommit, **all completed loans are gone instantly** — the entire
+> lending history of the library is wiped out, with serious consequences
+> for statistics, accounting audits, and GDPR records. In an explicit
+> transaction, a `ROLLBACK` would have undone it. The rule: **always
+> `BEGIN` before destructive DML in interactive sessions, verify the
+> effect with `SELECT`, and only then `COMMIT`.**
 
 ---
 
@@ -609,7 +725,24 @@ The lecture warns against using `TEXT` for everything. Looking at the
 it should be a more specific type, and what concrete query would break or
 produce wrong results if the wrong type were used?
 
-> *Your answer:*
+> **Answer:** The most tempting column to mis-type is `erscheinungsjahr`,
+> which one might store as `TEXT` since years "look like" labels.
+>
+> **A query that breaks:**
+>
+> ```sql
+> SELECT titel FROM buch WHERE erscheinungsjahr < 1960;
+> ```
+>
+> With `TEXT`, comparisons are lexicographic, not numeric:
+> - `'1957' < '1960'` → TRUE (correct, by accident)
+> - `'987'  < '1960'` → TRUE (correct, again by accident)
+> - `'2'    < '1960'` → FALSE (wrong! `'2'` is lexicographically greater)
+>
+> Furthermore, arithmetic fails silently in SQLite due to type affinity:
+> `erscheinungsjahr + 1` produces `19571` (string concatenation), not
+> `1958`. Using `INTEGER` enforces numeric semantics for comparisons and
+> arithmetic.
 
 **Question B – DDL as documentation:**  
 A colleague reads your `schema.sql` and says: "Constraints slow down inserts
@@ -617,14 +750,50 @@ A colleague reads your `schema.sql` and says: "Constraints slow down inserts
 reasons why enforcing constraints in the database is preferable to
 enforcing them only in application code.
 
-> *Your answer:*
+> **Answer:**
+> 1. **Single source of truth.** A database is often accessed by multiple
+>    applications: a web frontend, a mobile app, batch import scripts, BI
+>    tools. A rule encoded only in the web frontend's Java code does not
+>    protect against a malformed `INSERT` from a Python migration script
+>    or an analyst's direct SQL query. Database constraints apply to **all
+>    paths** of data modification.
+> 2. **The schema is the documentation.** Reading a well-written
+>    `schema.sql` is equivalent to reading a domain specification. The
+>    constraints (`tagesgebuehr > 0`, `email UNIQUE`, `CHECK
+>    rueckgabe_datum >= ausleihe_datum`) encode business rules in a
+>    machine-readable, self-verified form. A new developer understands the
+>    domain rules without reading any application code, and the constraints
+>    cannot drift out of sync with the data the way comments or wikis can.
 
 **Question C – NULL semantics in lending:**  
 In `ausleihe`, `rueckgabe_datum IS NULL` means "currently on loan". Could
 this semantic be expressed without using `NULL` — e.g. by using a status
 column instead? What are the trade-offs?
 
-> *Your answer:*
+> **Answer:** Yes, a `status` column can replace the NULL semantics:
+>
+> ```sql
+> status TEXT NOT NULL DEFAULT 'open'
+>        CHECK (status IN ('open', 'returned'))
+> ```
+>
+> **Advantages of the status column:**
+> - More readable: `WHERE status = 'open'` is clearer than
+>   `WHERE rueckgabe_datum IS NULL`.
+> - Extensible to additional states (`'lost'`, `'overdue'`, `'reserved'`)
+>   without schema changes.
+> - Removes ambiguity about what `NULL` means.
+>
+> **Drawbacks:**
+> - **Redundancy** with `rueckgabe_datum`: if the return date is non-NULL,
+>   the status must be `'returned'`. This creates two sources of truth
+>   that must be kept in sync via triggers or cross-column constraints.
+> - One extra column to store and index.
+>
+> **Pragmatic compromise:** keep `rueckgabe_datum` as the authoritative
+> field (it already encodes both "loan open" and "loan returned, with
+> date"), and derive the status on the fly in queries or views when
+> needed.
 
 **Question D – `TRUNCATE` vs. `DELETE`:**  
 If you wanted to reset the entire database and reload the sample data from
@@ -632,7 +801,31 @@ scratch, you would need to empty all four tables. Can you use `TRUNCATE`
 in SQLite? What alternative would you use, and in what order must the tables
 be emptied to respect foreign key constraints?
 
-> *Your answer:*
+> **Answer:** **No, SQLite does not support `TRUNCATE`.** The equivalent
+> is `DELETE FROM <table>;` without a `WHERE` clause. SQLite recognizes
+> this special case and applies a "truncate optimization" internally, but
+> the syntax is `DELETE`.
+>
+> **Deletion order (respecting FK dependencies):**
+> 1. `DELETE FROM ausleihe;` — depends on `exemplar` and `mitglied`.
+> 2. `DELETE FROM exemplar;` — depends on `buch`.
+> 3. `DELETE FROM mitglied;` — independent.
+> 4. `DELETE FROM buch;` — independent.
+>
+> This is the reverse of the creation order. Without this order, the
+> `ON DELETE RESTRICT` constraints raise foreign-key violations.
+>
+> For test scripts (never in production), foreign keys can be temporarily
+> disabled to delete in any order:
+>
+> ```sql
+> PRAGMA foreign_keys = OFF;
+> DELETE FROM ausleihe;
+> DELETE FROM exemplar;
+> DELETE FROM mitglied;
+> DELETE FROM buch;
+> PRAGMA foreign_keys = ON;
+> ```
 
 > **Screenshot 4:** Take a screenshot showing the output of the row-count
 > verification from Task 3a after completing all DML tasks, with
@@ -644,27 +837,93 @@ be emptied to respect foreign key constraints?
 
 ## Bonus Tasks
 
-1. **`INSERT INTO … SELECT`:** The library acquires a second copy of every
-   book that has been borrowed more than once. Write a single
-   `INSERT INTO exemplar … SELECT` statement that inserts one additional
-   row per qualifying book, with `standort = 'Neu-' || standort` of the
-   existing copy.
+### Bonus 1 — `INSERT INTO … SELECT`
 
-2. **Overdue calculation:** Write a `SELECT` that lists all currently open
-   loans (no return date), the member's full name, the book title, and the
-   number of days the book has been borrowed (using `julianday(CURRENT_DATE)
-   - julianday(ausleihe_datum)`). Sort by days descending.
+```sql
+INSERT INTO exemplar (isbn, standort)
+SELECT e.isbn,
+       'Neu-' || MIN(e.standort) AS new_standort
+FROM   exemplar e
+JOIN   ausleihe a ON a.exemplar_id = e.exemplar_id
+GROUP  BY e.isbn
+HAVING COUNT(*) > 1;
+```
 
-3. **Lending fee invoice:** Write a `SELECT` that computes the total lending
-   fee for each completed loan (return date not null):
-   `(julianday(rueckgabe_datum) - julianday(ausleihe_datum)) * tagesgebuehr`.
-   Join all necessary tables and show the member's name, book title, and
-   amount due.
+### Bonus 2 — Open loans with duration
 
-4. **GitHub Actions:** Add `.github/workflows/ci.yml` that installs SQLite,
-   runs `schema.sql` and `data.sql` against a fresh database, and verifies
-   the row counts with a shell assertion. Trigger the workflow by pushing
-   any commit to `main`.
+```sql
+SELECT m.nachname || ', ' || m.vorname  AS member_name,
+       b.titel                          AS book_title,
+       CAST(julianday(CURRENT_DATE) - julianday(a.ausleihe_datum) AS INTEGER) 
+                                        AS days_borrowed
+FROM   ausleihe a
+JOIN   exemplar e  ON e.exemplar_id = a.exemplar_id
+JOIN   buch     b  ON b.isbn        = e.isbn
+JOIN   mitglied m  ON m.mitglied_id = a.mitglied_id
+WHERE  a.rueckgabe_datum IS NULL
+ORDER  BY days_borrowed DESC;
+```
+
+### Bonus 3 — Lending fee invoice
+
+```sql
+SELECT m.nachname || ', ' || m.vorname  AS member_name,
+       b.titel                          AS book_title,
+       a.ausleihe_datum,
+       a.rueckgabe_datum,
+       ROUND(
+         (julianday(a.rueckgabe_datum) - julianday(a.ausleihe_datum))
+         * b.tagesgebuehr,
+         2)                             AS amount_due_eur
+FROM   ausleihe a
+JOIN   exemplar e  ON e.exemplar_id = a.exemplar_id
+JOIN   buch     b  ON b.isbn        = e.isbn
+JOIN   mitglied m  ON m.mitglied_id = a.mitglied_id
+WHERE  a.rueckgabe_datum IS NOT NULL
+ORDER  BY amount_due_eur DESC;
+```
+
+### Bonus 4 — GitHub Actions workflow
+
+```yaml
+# .github/workflows/ci.yml
+name: CI - Verify schema and data
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test-schema:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install SQLite
+        run: sudo apt-get update && sudo apt-get install -y sqlite3
+
+      - name: Create database and load schema
+        run: sqlite3 bibliothek.db < schema.sql
+
+      - name: Load sample data
+        run: sqlite3 bibliothek.db < data.sql
+
+      - name: Verify row counts
+        run: |
+          BUCH=$(sqlite3 bibliothek.db "SELECT COUNT(*) FROM buch;")
+          EXEMPLAR=$(sqlite3 bibliothek.db "SELECT COUNT(*) FROM exemplar;")
+          MITGLIED=$(sqlite3 bibliothek.db "SELECT COUNT(*) FROM mitglied;")
+          AUSLEIHE=$(sqlite3 bibliothek.db "SELECT COUNT(*) FROM ausleihe;")
+
+          test "$BUCH"     = "5" || (echo "buch != 5"; exit 1)
+          test "$EXEMPLAR" = "6" || (echo "exemplar != 6"; exit 1)
+          test "$MITGLIED" = "3" || (echo "mitglied != 3"; exit 1)
+          test "$AUSLEIHE" = "4" || (echo "ausleihe != 4"; exit 1)
+
+          echo "All row counts verified: 5, 6, 3, 4"
+```
 
 ---
 
